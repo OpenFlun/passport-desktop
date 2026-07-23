@@ -1,6 +1,6 @@
 {
-    "name": "passport-desktop",
-    "version": "0.1.2",
+    "name": "@flun/passport-desktop",
+    "version": "1.0.0",
     "main": "dist/index.js",
     "types": "native.d.ts",
     "description": "A Node.js addon for enabling Client-side Windows Hello using Microsoft Passport",
@@ -10,12 +10,16 @@
     ],
     "repository": {
         "type": "git",
-        "url": "https://github.com/MarkusJx/passport-desktop.git"
+        "url": "https://github.com/OpenFlun/passport-desktop.git"
     },
-    "author": {
-        "name": "MarkusJx",
-        "url": "https://github.com/MarkusJx"
+    "homepage": "https://github.com/OpenFlun/passport-desktop#readme",
+    "bugs": {
+        "url": "https://github.com/OpenFlun/passport-desktop/issues"
     },
+    "publishConfig": {
+        "access": "public"
+    },
+    "author": "flun <open@flun.top>",
     "files": [
         "dist",
         "native.js",
