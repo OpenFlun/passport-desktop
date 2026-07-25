@@ -1,3 +1,4 @@
+// 此文件定义 IntoWinBuffer trait,用于在 Node.js Buffer 与 Windows IBuffer 之间进行转换,便于与 Windows API 交互;
 use windows::core::Array;
 use windows::Security::Cryptography::CryptographicBuffer;
 use windows::Storage::Streams::IBuffer;

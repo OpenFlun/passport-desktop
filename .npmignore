@@ -3,6 +3,7 @@ Cargo.lock
 .cargo
 .github
 npm
+node_modules/
 .eslintrc
 .prettierignore
 rustfmt.toml
@@ -11,6 +12,7 @@ yarn.lock
 .yarn
 __test__
 renovate.json
+package-lock.json
 docs/
 native.js
 native.d.ts

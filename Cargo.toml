@@ -1,25 +1,25 @@
 [package]
-edition = "2021"
+edition = "2024"
 name = "passport-desktop"
-version = "0.1.0"
+version = "1.0.5"
 
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-napi = { version = "2.13.3", default-features = false, features = [
+napi = { version = "3.11.0", default-features = false, features = [
     "napi4",
     "napi6",
     "tokio_rt",
     "deferred_trace"
 ] }
-napi-derive = "2.13.0"
-tokio = "1.32.0"
-futures = "0.3.28"
+napi-derive = "3.6.0"
+tokio = "1.53.1"
+futures = "0.3.33"
 
 [target.'cfg(windows)'.dependencies]
-widestring = "1.0.2"
-windows = { version = "0.51.1", features = [
+widestring = "1.2.1"
+windows = { version = "0.62.2", features = [
     "Foundation",
     "Security_Credentials_UI",
     "Security_Cryptography",
@@ -30,10 +30,12 @@ windows = { version = "0.51.1", features = [
     "Win32_System_WinRT",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Threading",
 ] }
-
+pollster = "1.0.1"
 [build-dependencies]
-napi-build = "2.0.1"
+napi-build = "2.3.2"
 
 [profile.release]
 lto = true

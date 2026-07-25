@@ -1,13 +1,17 @@
 {
-    "include": ["ts-src/**/*"],
+    "include": [
+        "ts-src/**/*"
+    ],
     "compilerOptions": {
         "allowJs": true,
-        "target": "es2020",
-        "module": "commonjs",
-        "moduleResolution": "node",
+        "target": "es2022",
+        "module": "node16",
+        "moduleResolution": "node16",
         "esModuleInterop": true,
         "declaration": false,
-        "lib": ["ESNext", "es2020"],
+        "lib": [
+            "ES2022"
+        ],
         "strict": true,
         "strictFunctionTypes": true,
         "strictNullChecks": true,
@@ -15,12 +19,18 @@
         "alwaysStrict": true,
         "strictPropertyInitialization": true,
         "outDir": "./dist",
-        "downlevelIteration": true,
+        "rootDir": "./ts-src",
         "sourceMap": true,
         "resolveJsonModule": true,
         "noUnusedLocals": true,
         "noUnusedParameters": true,
-        "removeComments": true
+        "removeComments": true,
+        "forceConsistentCasingInFileNames": true,
+        "skipLibCheck": true,
+        "ignoreDeprecations": "6.0"
     },
-    "exclude": ["node_modules", "dist"]
+    "exclude": [
+        "node_modules",
+        "dist"
+    ]
 }

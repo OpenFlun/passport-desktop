@@ -1,31 +1,26 @@
-use napi::bindgen_prelude::{FromNapiValue, ToNapiValue};
+//! 定义 Windows Hello 用户验证结果枚举,用于表示验证操作的各种可能结果;
 use windows::Security::Credentials::UI::UserConsentVerificationResult;
 
+/// 用户验证操作的结果;用于 `Passport::request_verification` 方法的返回值;
 #[napi]
-/// The result of a user consent verification operation.
 pub enum VerificationResult {
-    /// The user consent verification operation succeeded.
+    /// 用户成功完成验证（如指纹、PIN 或人脸识别）;
     Verified,
-    /// The user consent verification operation failed
-    /// because the device is not present.
+    /// 设备不支持 Windows Hello（无指纹、摄像头等）;
     DeviceNotPresent,
-    /// The user consent verification operation failed
-    /// because Windows Hello is not configured for the user.
+    /// 当前用户未设置 Windows Hello;
     NotConfiguredForUser,
-    /// The user consent verification operation failed
-    /// because Windows Hello is disabled by policy.
+    /// 系统策略禁用了 Windows Hello;
     DisabledByPolicy,
-    /// The user consent verification operation
-    /// failed because the device is busy.
+    /// 设备正忙,无法处理验证请求;
     DeviceBusy,
-    /// The user consent verification operation failed
-    /// because the maximum number of attempts was exceeded.
+    /// 超过最大尝试次数,验证失败;
     RetriesExhausted,
-    /// The user consent verification operation
-    /// was canceled by the user.
+    /// 用户主动取消了验证对话框;
     Canceled,
 }
 
+/// 自动从 Windows API 结果转换,无需手动处理;
 impl TryFrom<UserConsentVerificationResult> for VerificationResult {
     type Error = napi::Error;
 
@@ -41,7 +36,7 @@ impl TryFrom<UserConsentVerificationResult> for VerificationResult {
             v => {
                 return Err(napi::Error::new(
                     napi::Status::GenericFailure,
-                    format!("Unknown verification result: {}", v.0),
+                    format!("未知的验证结果: {}", v.0),
                 ))
             }
         })

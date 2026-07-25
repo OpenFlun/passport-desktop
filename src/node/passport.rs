@@ -1,4 +1,4 @@
-use crate::check_account_exists;
+//! Passport 模块提供对 Windows Hello (Passkey) 的原生支持;包含账户管理、签名、验证等功能;
 use crate::node::key_creation_option::KeyCreationOption;
 use crate::node::public_key_encoding::PublicKeyEncoding;
 use crate::node::verification_result::VerificationResult;
@@ -7,290 +7,178 @@ use crate::util::mappers::MapNapiError;
 use crate::util::traits::IntoWinBuffer;
 use crate::win::passport::{create_passport_key, get_passport_account, get_passport_account_sync};
 use napi::bindgen_prelude::Buffer;
-use std::sync::Mutex;
-use windows::core::HSTRING;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
+use windows::core::{HSTRING, PWSTR};
 use windows::Security::Credentials::UI::UserConsentVerifier;
 use windows::Security::Credentials::{KeyCredentialManager, KeyCredentialStatus};
 use windows::Security::Cryptography::Core::CryptographicPublicKeyBlobType;
+use windows::Win32::Foundation::*;
+use windows::Win32::System::Threading::*;
+use windows::Win32::UI::WindowsAndMessaging::*;
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    keybd_event, VK_MENU, KEYEVENTF_KEYUP, KEYBD_EVENT_FLAGS
+};
 
+/// Passport 实例,绑定一个唯一的账户 ID,管理 Windows Hello 凭证;
 #[napi]
-/// The Passport module provides an interface to the Windows Hello API.
-/// It allows you to create a key pair and sign data using the private key.
-/// The public key can be exported in a variety of formats.
-///
-/// # Example
-/// ```ts
-/// import { Passport, PublicKeyEncoding, KeyCreationOption } from 'passport-desktop';
-/// import { randomBytes, createPublicKey, createVerify } from 'node:crypto';
-///
-/// if (!Passport.available()) {
-///   throw new Error('Windows Hello is not available');
-/// }
-///
-/// await Passport.accountWithIdExists('my-account-id'); // false
-///
-/// const passport = new Passport('my-account-id');
-/// if (!passport.accountExists) {
-///   await passport.createAccount(KeyCreationOption.FailIfExists);
-/// }
-///
-/// const challenge = randomBytes(32);
-/// const signature = await passport.sign(challenge);
-///
-/// // Verify the signature with the public key
-/// const keyBuffer = await passport.getPublicKey(PublicKeyEncoding.Pkcs1RsaPublicKey);
-/// const key = createPublicKey({
-///   key: keyBuffer,
-///   format: 'der',
-///   type: 'pkcs1'
-/// });
-///
-/// // Create a verifier and verify the challenge
-/// const verify = createVerify('SHA256');
-/// verify.write(challenge);
-/// verify.end();
-///
-/// verify.verify(key, signature); // true
-///
-/// // Delete the account
-/// await passport.deleteAccount();
-/// ```
 pub struct Passport {
     account_id: String,
-    account_exists: Mutex<bool>,
+    account_exists: Arc<Mutex<bool>>,
 }
 
 #[napi]
 impl Passport {
+    /// 构造函数:创建新的 Passport 实例,立即检查账户是否存在;
     #[napi(constructor)]
-    /// Create a new Passport instance.
-    /// The account_id is used to identify the account in the Windows Credential Manager.
-    /// If an account with the given id already exists, it will be used.
-    /// You can check if an account exists with the `accountExists` getter.
-    ///
-    /// # Example
-    /// ```ts
-    /// import { Passport } from 'passport-desktop';
-    ///
-    /// const passport = new Passport('my-account-id');
-    /// ```
-    ///
-    /// @param accountId The id of the account in the Windows Credential Manager.
     pub fn new(account_id: String) -> napi::Result<Self> {
+        let exists = Self::account_with_id_exists(account_id.clone())?;
         Ok(Self {
-            account_exists: Mutex::new(Self::account_with_id_exists(account_id.clone())?),
             account_id,
+            account_exists: Arc::new(Mutex::new(exists)),
         })
     }
 
+    /// 创建 Windows Hello 账户（注册 Passkey）,如果账户已存在且 `creation_option` 不是 `FailIfExists`,则替换;
     #[napi]
-    /// Create a new passport account.
-    /// You can optionally pass a {@link KeyCreationOption} to customize the key creation.
-    /// If no option is passed, an existing key will be replaced.
-    /// If the account does not exist, it will be created.
-    ///
-    /// # Example
-    /// ```ts
-    /// import { Passport, KeyCreationOption } from 'passport-desktop';
-    ///
-    /// const passport = new Passport('my-account-id');
-    /// await passport.createAccount(KeyCreationOption.FailIfExists);
-    /// ```
-    ///
-    /// @param creationOption The {@link KeyCreationOption} to use when creating the key.
-    pub async fn create_account(
+    pub fn create_account(
         &self,
         creation_option: Option<KeyCreationOption>,
     ) -> napi::Result<()> {
-        let create_result =
-            create_passport_key(&self.account_id, creation_option.map(|o| o.into()))
+        let stop = start_window_activation_polling();
+        let result = pollster::block_on(async {
+            let account_id = self.account_id.clone();
+            let account_exists = self.account_exists.clone();
+            let create_result = create_passport_key(
+                &account_id,
+                creation_option.map(|o| o.into()),
+            )
+            .await
+            .map_napi_error()?;
+            match create_result {
+                KeyCredentialStatus::Success => {
+                    *account_exists.lock().unwrap() = true;
+                    Ok(())
+                }
+                s => Err(napi::Error::from_credential_status(s)),
+            }
+        });
+        if result.is_ok() {
+            thread::sleep(Duration::from_millis(150));
+            activate_credential_window();
+        }
+        stop.store(true, Ordering::Relaxed);
+        result
+    }
+
+    /// 使用私钥对挑战进行签名（登录验证）;会弹出 Windows Hello 对话框要求用户验证身份;
+    #[napi]
+    pub fn sign(&self, challenge: Buffer) -> napi::Result<Buffer> {
+        let stop = start_window_activation_polling();
+        let result = pollster::block_on(async {
+            let account_id = self.account_id.clone();
+            let account_exists = self.account_exists.clone();
+            if !*account_exists.lock().unwrap() {
+                return Err(napi::Error::from_reason("账户不存在"));
+            }
+            let credential = get_passport_account(&account_id)
                 .await
                 .map_napi_error()?;
-
-        match create_result {
-            KeyCredentialStatus::Success => {
-                *self.account_exists.lock().unwrap() = true;
-                Ok(())
+            let status = credential.Status().map_napi_error()?;
+            if status != KeyCredentialStatus::Success {
+                return Err(napi::Error::from_credential_status(status));
             }
-            s => Err(napi::Error::from_credential_status(s)),
+            let credential = credential.Credential().map_napi_error()?;
+            let res = credential
+                .RequestSignAsync(&challenge.into_win_buffer().map_napi_error()?)
+                .map_napi_error()?
+                .await
+                .map_napi_error()?;
+            let status = res.Status().map_napi_error()?;
+            if status != KeyCredentialStatus::Success {
+                return Err(napi::Error::from_credential_status(status));
+            }
+            Buffer::from_win_buffer(res.Result().map_napi_error()?).map_napi_error()
+        });
+        if result.is_ok() {
+            thread::sleep(Duration::from_millis(150));
+            activate_credential_window();
         }
+        stop.store(true, Ordering::Relaxed);
+        result
     }
 
+    /// 删除 Windows Hello 账户（移除 Passkey）;
     #[napi]
-    /// Sign a challenge with the private key.
-    /// If the account does not exist, an error will be thrown.
-    /// This will open a Windows Hello dialog to verify the user.
-    /// If the challenge is not verified, an error will be thrown.
-    ///
-    /// The signature can be verified with the public key, for example
-    /// using the `crypto` module.
-    ///
-    /// # Example
-    /// ```ts
-    /// import { Passport, PublicKeyEncoding } from 'passport-desktop';
-    /// import { randomBytes, createPublicKey, createVerify } from 'node:crypto';
-    ///
-    /// const passport = new Passport('my-account-id');
-    /// // Create the key pair
-    /// await passport.createAccount();
-    ///
-    /// // Create a challenge and sign it
-    /// const challenge = randomBytes(32);
-    /// const signature = await passport.sign(challenge);
-    ///
-    /// // Verify the signature with the public key
-    /// const keyBuffer = await passport.getPublicKey(PublicKeyEncoding.Pkcs1RsaPublicKey);
-    /// const key = createPublicKey({
-    ///   key: keyBuffer,
-    ///   format: 'der',
-    ///   type: 'pkcs1'
-    /// });
-    ///
-    /// // Create a verifier and verify the challenge
-    /// const verify = createVerify('SHA256');
-    /// verify.write(challenge);
-    /// verify.end();
-    ///
-    /// verify.verify(key, signature); // true
-    /// ```
-    ///
-    /// @see {@link getPublicKey}
-    /// @param challenge The challenge to sign.
-    /// @return The signature.
-    pub async fn sign(&self, challenge: Buffer) -> napi::Result<Buffer> {
-        check_account_exists!(self.account_exists);
-        let credential = get_passport_account(&self.account_id)
-            .await
-            .map_napi_error()?;
-
-        let status = credential.Status().map_napi_error()?;
-        if status != KeyCredentialStatus::Success {
-            return Err(napi::Error::from_credential_status(status));
+    pub fn delete_account(&self) -> napi::Result<()> {
+        if !*self.account_exists.lock().unwrap() {
+            return Err(napi::Error::from_reason("账户不存在"));
         }
-
-        let credential = credential.Credential().map_napi_error()?;
-        let res = credential
-            .RequestSignAsync(&challenge.into_win_buffer().map_napi_error()?)
-            .map_napi_error()?
-            .get()
-            .map_napi_error()?;
-
-        let status = res.Status().map_napi_error()?;
-        if status != KeyCredentialStatus::Success {
-            return Err(napi::Error::from_credential_status(status));
-        }
-
-        Buffer::from_win_buffer(res.Result().map_napi_error()?).map_napi_error()
-    }
-
-    #[napi]
-    /// Delete the account from the Windows Credential Manager.
-    /// If the account does not exist, an error will be thrown.
-    pub async fn delete_account(&self) -> napi::Result<()> {
-        check_account_exists!(self.account_exists);
-        KeyCredentialManager::DeleteAsync(&HSTRING::from(&self.account_id))
-            .map_napi_error()?
-            .await
-            .map_napi_error()?;
-
+        pollster::block_on(async {
+            KeyCredentialManager::DeleteAsync(&HSTRING::from(&self.account_id))
+                .map_napi_error()?
+                .await
+                .map_napi_error()
+        })?;
         *self.account_exists.lock().unwrap() = false;
         Ok(())
     }
 
+    /// 获取账户的公钥（用于验证签名）;
     #[napi]
-    /// Get the public key of the account.
-    /// If the account does not exist, an error will be thrown.
-    /// The encoding of the key can be specified, defaulting to
-    /// {@link PublicKeyEncoding.Pkcs1RsaPublicKey}.
-    ///
-    /// In order to verify a signature using this public key,
-    /// use the {@link PublicKeyEncoding.Pkcs1RsaPublicKey}
-    /// encoding and pass the result to the `crypto` module.
-    ///
-    /// # Example
-    /// ```ts
-    /// import { Passport, PublicKeyEncoding } from 'passport-desktop';
-    /// import { createPublicKey } from 'node:crypto';
-    ///
-    /// const passport = new Passport('my-account-id');
-    /// // Create the key pair
-    /// await passport.createAccount();
-    ///
-    /// const keyBuffer = await passport.getPublicKey(PublicKeyEncoding.Pkcs1RsaPublicKey);
-    /// // Use these options to load the public key
-    /// const key = createPublicKey({
-    ///   key: keyBuffer,
-    ///   format: 'der',
-    ///   type: 'pkcs1'
-    /// });
-    /// ```
-    ///
-    /// @see {@link sign}
-    /// @param encoding The encoding to use for the public key.
-    /// @return The public key.
-    pub async fn get_public_key(
+    pub fn get_public_key(
         &self,
         encoding: Option<PublicKeyEncoding>,
     ) -> napi::Result<Buffer> {
-        check_account_exists!(self.account_exists);
-        let credential = get_passport_account(&self.account_id)
-            .await
-            .map_napi_error()?;
-
-        let status = credential.Status().map_napi_error()?;
-        if status != KeyCredentialStatus::Success {
-            return Err(napi::Error::from_credential_status(status));
+        if !*self.account_exists.lock().unwrap() {
+            return Err(napi::Error::from_reason("账户不存在"));
         }
-
-        let credential = credential.Credential().map_napi_error()?;
-        let res = credential
-            .RetrievePublicKeyWithBlobType(
-                encoding
-                    .map(|e| e.into())
-                    .unwrap_or(CryptographicPublicKeyBlobType::Pkcs1RsaPublicKey),
-            )
-            .map_napi_error()?;
-
-        Buffer::from_win_buffer(res).map_napi_error()
+        pollster::block_on(async {
+            let credential = get_passport_account(&self.account_id)
+                .await
+                .map_napi_error()?;
+            let status = credential.Status().map_napi_error()?;
+            if status != KeyCredentialStatus::Success {
+                return Err(napi::Error::from_credential_status(status));
+            }
+            let credential = credential.Credential().map_napi_error()?;
+            let res = credential
+                .RetrievePublicKeyWithBlobType(
+                    encoding
+                        .map(|e| e.into())
+                        .unwrap_or(CryptographicPublicKeyBlobType::Pkcs1RsaPublicKey),
+                )
+                .map_napi_error()?;
+            Buffer::from_win_buffer(res).map_napi_error()
+        })
     }
 
+    /// 账户是否存在于 Windows 凭据管理器中;
     #[napi(getter)]
-    /// Whether the account exists in the Windows Credential Manager.
-    /// This is only updated if the account exists when the Passport
-    /// instance is created and when {@link createAccount} or
-    /// {@link deleteAccount} are called. If the account is deleted
-    /// or created outside of this instance, this value will not be
-    /// updated.
     pub fn account_exists(&self) -> bool {
         *self.account_exists.lock().unwrap()
     }
 
+    /// 检测当前平台是否支持 Windows Hello;
     #[napi]
-    /// Whether the Passport API is available on the current platform
-    /// and the current user has permission to use it.
-    /// This will return `false` on non-Windows platforms and if the
-    /// user does not have permission to use Windows Hello.
-    ///
-    /// @return Whether the Passport API is available.
     pub fn available() -> napi::Result<bool> {
-        KeyCredentialManager::IsSupportedAsync()
-            .map_napi_error()?
-            .get()
-            .map_napi_error()
+        pollster::block_on(async {
+            KeyCredentialManager::IsSupportedAsync()
+                .map_napi_error()?
+                .await
+                .map_napi_error()
+        })
     }
 
+    /// 静态方法,检查指定 ID 的账户是否存在;
     #[napi]
-    /// Whether an account with the given ID exists in the Windows
-    /// Credential Manager.
-    ///
-    /// @param id The ID of the account to check.
-    /// @return Whether the account exists.
     pub fn account_with_id_exists(id: String) -> napi::Result<bool> {
         let status = get_passport_account_sync(&id)
             .map_napi_error()?
             .Status()
             .map_napi_error()?;
-
         match status {
             KeyCredentialStatus::Success => Ok(true),
             KeyCredentialStatus::NotFound => Ok(false),
@@ -298,34 +186,80 @@ impl Passport {
         }
     }
 
+    /// 主动请求用户验证（弹出对话框）;
     #[napi]
-    /// Request verification from the user. This will show a dialog
-    /// to the user asking them to verify their identity. If the user
-    /// accepts, the returned value will be {@link VerificationResult.Verified}.
-    /// If the user rejects or cancels the dialog, the returned value will be
-    /// another value from {@link VerificationResult} specifying the rejection
-    /// reason.
-    ///
-    /// # Example
-    /// ```ts
-    /// import { Passport, VerificationResult } from 'passport-desktop';
-    ///
-    /// const result = await Passport.requestVerification('Please verify your identity');
-    /// if (result === VerificationResult.Verified) {
-    ///   console.log('User verified');
-    /// } else {
-    ///   console.log('User rejected verification');
-    /// }
-    /// ```
-    ///
-    /// @param message The message to show to the user.
-    /// @return The result of the verification request.
-    pub async fn request_verification(message: String) -> napi::Result<VerificationResult> {
+    pub fn request_verification(message: String) -> napi::Result<VerificationResult> {
         VerificationResult::try_from(
-            UserConsentVerifier::RequestVerificationAsync(&HSTRING::from(message))
-                .map_napi_error()?
-                .await
-                .map_napi_error()?,
+            pollster::block_on(async {
+                UserConsentVerifier::RequestVerificationAsync(&HSTRING::from(message))
+                    .map_napi_error()?
+                    .await
+                    .map_napi_error()
+            })?,
         )
+    }
+}
+
+/// 启动一个后台线程,每隔 200ms 查找并激活 `CredentialUIBroker.exe` 窗口,
+/// 同时发送 Alt 键以提升窗口层级;返回一个 `AtomicBool` 标志,设为 `true` 即可停止轮询;
+fn start_window_activation_polling() -> Arc<AtomicBool> {
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_clone = stop.clone();
+    thread::spawn(move || {
+        while !stop_clone.load(Ordering::Relaxed) {
+            activate_credential_window();
+            thread::sleep(Duration::from_millis(200));
+        }
+    });
+    stop
+}
+
+/// 单次尝试激活 Windows Hello 窗口, 通过枚举所有顶层窗口,匹配进程名 `CredentialUIBroker.exe`;
+fn activate_credential_window() {
+    unsafe {
+        let mut found = false;
+        let _ = EnumWindows(
+            Some(enum_window_proc),
+            LPARAM(&mut found as *mut _ as isize),
+        );
+    }
+}
+
+/// `EnumWindows` 回调：查找目标进程并激活窗口;
+unsafe extern "system" fn enum_window_proc(hwnd: HWND, lparam: LPARAM) -> windows::core::BOOL {
+    unsafe {
+        let found = &mut *(lparam.0 as *mut bool);
+        if *found {
+            return windows::core::BOOL(0);
+        }
+
+        let mut process_id: u32 = 0;
+        GetWindowThreadProcessId(hwnd, Some(&mut process_id));
+        if process_id == 0 {
+            return windows::core::BOOL(1);
+        }
+
+        if let Ok(handle) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id) {
+            let mut buffer = [0u16; 260];
+            let mut size = buffer.len() as u32;
+            let result = QueryFullProcessImageNameW(
+                handle,
+                PROCESS_NAME_FORMAT(0),
+                PWSTR(buffer.as_mut_ptr()),
+                &mut size,
+            );
+            if result.is_ok() {
+                let name = String::from_utf16_lossy(&buffer[..size as usize]);
+                if name.contains("CredentialUIBroker.exe") {
+                    let _ = SetForegroundWindow(hwnd);
+                    let vk_menu = VK_MENU.0 as u8;
+                    keybd_event(vk_menu, 0, KEYBD_EVENT_FLAGS(0), 0);
+                    keybd_event(vk_menu, 0, KEYEVENTF_KEYUP, 0);
+                    *found = true;
+                    return windows::core::BOOL(0);
+                }
+            }
+        }
+        windows::core::BOOL(1)
     }
 }
