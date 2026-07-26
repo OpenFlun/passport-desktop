@@ -65,10 +65,6 @@ impl Passport {
                 s => Err(napi::Error::from_credential_status(s)),
             }
         });
-        if result.is_ok() {
-            thread::sleep(Duration::from_millis(150));
-            activate_credential_window();
-        }
         stop.store(true, Ordering::Relaxed);
         result
     }
@@ -102,10 +98,6 @@ impl Passport {
             }
             Buffer::from_win_buffer(res.Result().map_napi_error()?).map_napi_error()
         });
-        if result.is_ok() {
-            thread::sleep(Duration::from_millis(150));
-            activate_credential_window();
-        }
         stop.store(true, Ordering::Relaxed);
         result
     }
