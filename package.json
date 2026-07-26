@@ -1,13 +1,11 @@
 {
   "name": "passport-desktop",
   "version": "1.0.5",
-  "main": "dist/index.js",
-  "types": "native.d.ts",
   "description": "A Node.js addon for enabling Client-side Windows Hello using Microsoft Passport",
-  "keywords": [
-    "Windows Hello",
-    "Microsoft Passport"
-  ],
+  "main": "native.js",
+  "types": "native.d.ts",
+  "author": "flun <open@flun.top>",
+  "license": "ISC",
   "repository": {
     "type": "git",
     "url": "https://github.com/OpenFlun/passport-desktop.git"
@@ -16,15 +14,13 @@
   "bugs": {
     "url": "https://github.com/OpenFlun/passport-desktop/issues"
   },
-  "publishConfig": {
-    "access": "public"
-  },
-  "author": "flun <open@flun.top>",
-  "files": [
-    "dist",
-    "native.js",
-    "native.d.ts"
+  "keywords": [
+    "Windows Hello",
+    "Microsoft Passport"
   ],
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "napi": {
     "name": "passport-desktop",
     "triples": {
@@ -33,63 +29,17 @@
         "x86_64-pc-windows-msvc",
         "i686-pc-windows-msvc"
       ]
-    },
-    "ts": {
-      "constEnum": false
     }
   },
-  "license": "ISC",
-  "devDependencies": {
-    "@napi-rs/cli": "^3.7.4",
-    "@types/is-ci": "^3.0.4",
-    "@types/node": "^26.1.1",
-    "ava": "^8.0.1",
-    "is-ci": "^4.1.0",
-    "prettier": "^3.9.6",
-    "rimraf": "^6.1.3",
-    "tsx": "^4.23.1",
-    "typedoc": "^0.28.20",
-    "typescript": "^6.0.3"
-  },
-  "ava": {
-    "timeout": "3m",
-    "extensions": {
-      "ts": "module"
-    },
-    "nodeArguments": [
-      "--loader=tsx"
-    ]
-  },
-  "engines": {
-    "node": ">=22.12.0",
-    "npm": ">=10.0.0"
-  },
   "scripts": {
-    "artifacts": "napi artifacts",
     "build": "napi build --platform --release --js native.js --dts native.d.ts",
-    "build:debug": "napi build --platform --js native.js --dts native.d.ts",
-    "build:ts": "rimraf dist && tsc",
-    "postbuild": "npm run build:ts",
-    "prepublishOnly": "napi prepublish -t npm",
-    "test": "ava",
-    "universal": "napi universal",
-    "version": "napi version",
-    "format": "prettier --write .",
-    "docs": "typedoc --out docs native.d.ts"
+    "build:debug": "napi build --platform --js native.js --dts native.d.ts"
   },
-  "prettier": {
-    "printWidth": 80,
-    "semi": true,
-    "singleQuote": true,
-    "tabWidth": 4,
-    "trailingComma": "es5"
+  "devDependencies": {
+    "@napi-rs/cli": "^3.7.4"
   },
-  "optionalDependencies": {
-    "@flun/passport-desktop-win32-ia32-msvc": "1.0.5",
-    "@flun/passport-desktop-win32-x64-msvc": "1.0.5"
-  },
-  "allowScripts": {
-    "node": true,
-    "esbuild": true
-  }
+  "files": [
+    "native.js",
+    "native.d.ts"
+  ]
 }
