@@ -114,18 +114,14 @@ await passport.deleteAccount();
 import { Passport } from '@flun/passport-desktop-win32-x64-msvc';
 import { randomBytes, createPublicKey, createVerify } from 'crypto';
 
-async function authenticate() {
+const authenticate= async ()=> {
   // 1. 检查可用性
-  if (!Passport.available()) {
-    throw new Error('Windows Hello 不可用');
-  }
+  if (!Passport.available()) throw new Error('Windows Hello 不可用');
 
   // 2. 创建或获取账户
   const accountId = 'user123';
   const passport = new Passport(accountId);
-  if (!passport.accountExists) {
-    await passport.createAccount();
-  }
+  if (!passport.accountExists) await passport.createAccount();
 
   // 3. 生成挑战并签名
   const challenge = randomBytes(32);
@@ -157,11 +153,9 @@ async function authenticate() {
 
 ```javascript
 // 假设已从插件导入 Passport,并有一些辅助函数
-async function verifyWithWindowsHello(credential, expectedChallenge, expectedOrigin, expectedRPID) {
+const verifyWithWindowsHello = async (credential, expectedChallenge, expectedOrigin, expectedRPID)=> {
   const passport = new Passport(credential.id);
-  if (!passport.accountExists) {
-    throw new Error('账户不存在,请先注册');
-  }
+  if (!passport.accountExists)  throw new Error('账户不存在,请先注册');
 
   const challengeBuffer = Buffer.from(expectedChallenge);
   const signature = await passport.sign(challengeBuffer);
@@ -177,10 +171,7 @@ async function verifyWithWindowsHello(credential, expectedChallenge, expectedOri
   verifier.end();
   const verified = verifier.verify(publicKey, signature);
 
-  if (!verified) {
-    throw new Error('签名验证失败');
-  }
-
+  if (!verified) throw new Error('签名验证失败');
   // 返回认证信息(此处简化)
   return {
     verified: true,
@@ -198,15 +189,15 @@ async function verifyWithWindowsHello(credential, expectedChallenge, expectedOri
 
 ## API 参考
 
-| 方法 / 属性                         | 说明                                                                                        |
-| ----------------------------------- | ------------------------------------------------------------------------------------------- |
-| `Passport.available()`              | 静态方法,返回 `true` 如果系统支持 Windows Hello;                                            |
+| 方法 / 属性                         | 说明                                                                                      |
+| ----------------------------------- | ----------------------------------------------------------------------------------------- |
+| `Passport.available()`              | 静态方法,返回 `true` 如果系统支持 Windows Hello;                                          |
 | `new Passport(accountId)`           | 创建实例,自动检查账户是否存在(`accountExists` 属性);                                      |
-| `passport.accountExists`            | 只读属性,`true` 表示该账户已注册;                                                           |
+| `passport.accountExists`            | 只读属性,`true` 表示该账户已注册;                                                         |
 | `passport.createAccount([option])`  | 注册新 Passkey,`option` 可为 `KeyCreationOption.FailIfExists` 或 `ReplaceExisting`(默认); |
-| `passport.sign(challenge: Buffer)`  | 对挑战签名,返回签名 `Buffer`;                                                               |
+| `passport.sign(challenge: Buffer)`  | 对挑战签名,返回签名 `Buffer`;                                                             |
 | `passport.getPublicKey([encoding])` | 获取公钥,默认 `PublicKeyEncoding.Pkcs1RsaPublicKey`(DER 格式);                            |
-| `passport.deleteAccount()`          | 删除当前账户;                                                                               |
+| `passport.deleteAccount()`          | 删除当前账户;                                                                             |
 | `Passport.accountWithIdExists(id)`  | 静态方法,检查指定账户是否存在(返回 `Promise<boolean>`);                                   |
 
 **枚举**:
