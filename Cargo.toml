@@ -7,15 +7,15 @@ version = "1.0.6"
 crate-type = ["cdylib"]
 
 [dependencies]
-napi = { version = "3.11.0", default-features = false, features = [
+napi = { version = "3.15.0", default-features = false, features = [
     "napi4",
     "napi6",
     "tokio_rt",
     "deferred_trace"
 ] }
-napi-derive = "3.6.0"
-tokio = "1.53.1"
-futures = "0.3.33"
+napi-derive = "3.6.13"
+tokio = "1.54.1"
+futures = "0.3.34"
 
 [target.'cfg(windows)'.dependencies]
 widestring = "1.2.1"
@@ -35,7 +35,10 @@ windows = { version = "0.62.2", features = [
 ] }
 pollster = "1.0.1"
 [build-dependencies]
-napi-build = "2.3.2"
+napi-build = "2.6.0"
 
 [profile.release]
 lto = true
+
+[lints.rust]
+linker_messages = "allow"

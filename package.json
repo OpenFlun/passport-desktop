@@ -1,6 +1,6 @@
 {
   "name": "passport-desktop",
-  "version": "1.0.5",
+  "version": "1.0.8",
   "description": "A Node.js addon for enabling Client-side Windows Hello using Microsoft Passport",
   "main": "native.js",
   "types": "native.d.ts",
@@ -36,7 +36,7 @@
     "build:debug": "napi build --platform --js native.js --dts native.d.ts"
   },
   "devDependencies": {
-    "@napi-rs/cli": "^3.7.4"
+    "@napi-rs/cli": "^3.10.9"
   },
   "files": [
     "native.js",
